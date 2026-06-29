@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+/*
+  Zenvyk Guardian theme.
+  - Dashboard + auth: dark navy with an emerald-green brand.
+  - Landing: light (uses the .gd-light scope / explicit utilities).
+  Tailwind v4: design tokens are exposed to utilities via @theme inline.
+*/
+
+:root {
+  /* Surfaces (dark navy) */
+  --background: #0a1322;
+  --sidebar: #0b1626;
+  --surface: #0f1c2e;
+  --surface-2: #14263b;
+  --surface-3: #1b3047;
+  --border: #1d3149;
+  --border-strong: #294560;
+
+  /* Text */
+  --foreground: #e8edf5;
+  --muted: #8b9bb4;
+  --muted-2: #5d6f8a;
+
+  /* Brand / accent — emerald green */
+  --primary: #10b981;
+  --primary-foreground: #04150f;
+  --accent: #2dd4a7;
+
+  /* Verdict / status colors */
+  --pass: #2dd4a7;
+  --flagged: #f59e0b;
+  --blocked: #f0526a;
+  --pass-soft: rgba(45, 212, 167, 0.14);
+  --flagged-soft: rgba(245, 158, 11, 0.14);
+  --blocked-soft: rgba(240, 82, 106, 0.14);
+
+  --radius: 0.75rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-sidebar: var(--sidebar);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-2: var(--muted-2);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+
+  --color-pass: var(--pass);
+  --color-flagged: var(--flagged);
+  --color-blocked: var(--blocked);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --radius-lg: var(--radius);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, dark scrollbars to match the dashboard */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
