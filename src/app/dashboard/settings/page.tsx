@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Alert } from "@/components/ui/feedback";
+import { ProfileForm } from "@/components/settings/profile-form";
 
 export const metadata: Metadata = { title: "Settings · Zenvyk Guardian" };
 
@@ -36,6 +37,15 @@ export default async function SettingsPage() {
           this preview.
         </Alert>
       ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Your name</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ProfileForm />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

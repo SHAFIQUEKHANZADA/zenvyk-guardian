@@ -21,9 +21,22 @@ export default async function DashboardLayout({
     // Middleware already guards this, but double-check on the server.
     if (!user) redirect("/login");
     email = user.email ?? null;
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("first_name, last_name")
+      .eq("id", user.id)
+      .single();
+
+    const fromProfile = [profile?.first_name, profile?.last_name]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+
     name =
-      (user.user_metadata?.full_name as string | undefined) ??
-      (user.user_metadata?.name as string | undefined) ??
+      fromProfile ||
+      (user.user_metadata?.full_name as string | undefined) ||
+      (user.user_metadata?.name as string | undefined) ||
       null;
   }
 

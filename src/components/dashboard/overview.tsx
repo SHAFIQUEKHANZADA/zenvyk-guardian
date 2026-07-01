@@ -13,6 +13,11 @@ import {
   CalendarDays,
 } from "lucide-react";
 import { fetchStats, type DashboardStats } from "@/lib/api";
+import {
+  fetchUserVerifications,
+  computeStatsFromVerifications,
+} from "@/lib/verifications";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { formatNumber, formatPercent, formatMs } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Alert, Spinner } from "@/components/ui/feedback";
@@ -38,7 +43,23 @@ export function Overview() {
     setLoading(true);
     setError(null);
     try {
-      setStats(await fetchStats());
+      if (isSupabaseConfigured) {
+        // Primary source: the signed-in user's own stored verification
+        // history — this persists across logout/login. The backend /stats
+        // is used only as a fallback when there's no history yet.
+        const rows = await fetchUserVerifications(100);
+        if (rows.length > 0) {
+          setStats(computeStatsFromVerifications(rows));
+        } else {
+          try {
+            setStats(await fetchStats());
+          } catch {
+            setStats(computeStatsFromVerifications([])); // empty states, no error
+          }
+        }
+      } else {
+        setStats(await fetchStats());
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load stats.");
     } finally {

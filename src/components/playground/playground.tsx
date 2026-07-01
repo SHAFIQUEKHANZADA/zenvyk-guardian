@@ -1,14 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Sparkles, ShieldCheck, Gauge } from "lucide-react";
 import { verifyPrompt, type VerifyResult } from "@/lib/api";
+import { logVerification } from "@/lib/verifications";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge, verdictTone } from "@/components/ui/badge";
 import { Alert, Spinner, EmptyState } from "@/components/ui/feedback";
 import { cn, formatPercent } from "@/lib/utils";
+
+// Persist the last prompt + result so navigating away and back (or a tab
+// switch that remounts the component) doesn't wipe the panel.
+const STORAGE_KEY = "gd:playground";
 
 const EXAMPLES = [
   "What is the capital of France?",
@@ -28,13 +33,47 @@ export function Playground() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Restore persisted prompt + result on mount (sync from sessionStorage).
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as {
+          prompt?: string;
+          result?: VerifyResult | null;
+        };
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        if (saved.prompt) setPrompt(saved.prompt);
+        if (saved.result) setResult(saved.result);
+      }
+    } catch {
+      /* ignore malformed storage */
+    }
+  }, []);
+
+  // Persist prompt + result whenever they change.
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ prompt, result }));
+    } catch {
+      /* storage unavailable (private mode / quota) */
+    }
+  }, [prompt, result]);
+
   async function handleVerify() {
     if (!prompt.trim()) return;
+    const cleanPrompt = prompt.trim();
     setLoading(true);
     setError(null);
     setResult(null);
+    const startedAt = performance.now();
     try {
-      setResult(await verifyPrompt(prompt.trim()));
+      const res = await verifyPrompt(cleanPrompt);
+      const elapsed = Math.round(performance.now() - startedAt);
+      setResult(res);
+      // Best-effort: persist the run so it shows on the dashboard and
+      // survives logout/login. Never blocks the UI on a DB error.
+      logVerification(res, cleanPrompt, elapsed).catch(() => {});
     } catch (err) {
       setError(err instanceof Error ? err.message : "Verification failed.");
     } finally {
