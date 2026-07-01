@@ -47,7 +47,14 @@ export function Overview() {
         // Primary source: the signed-in user's own stored verification
         // history — this persists across logout/login. The backend /stats
         // is used only as a fallback when there's no history yet.
-        const rows = await fetchUserVerifications(100);
+        let rows: Awaited<ReturnType<typeof fetchUserVerifications>> = [];
+        try {
+          rows = await fetchUserVerifications(100);
+        } catch (dbErr) {
+          // e.g. the `verifications` table hasn't been created yet — degrade
+          // gracefully instead of blanking the dashboard.
+          console.warn("Could not load verification history:", dbErr);
+        }
         if (rows.length > 0) {
           setStats(computeStatsFromVerifications(rows));
         } else {
