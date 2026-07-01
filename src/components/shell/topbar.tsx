@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, X, Bell, BookOpen } from "lucide-react";
+import { Menu, X, Bell } from "lucide-react";
 import { Logo } from "@/components/brand";
 import { titleForPath } from "./nav";
 import { SidebarNav } from "./sidebar";
@@ -45,13 +45,6 @@ export function Topbar({
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-3">
-          <Link
-            href="/dashboard"
-            className="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-muted hover:bg-surface-2 hover:text-foreground sm:flex"
-          >
-            <BookOpen className="h-4 w-4" />
-            Docs
-          </Link>
           <button
             className="relative rounded-lg p-2 text-muted hover:bg-surface-2 hover:text-foreground"
             aria-label="Notifications"

@@ -10,10 +10,14 @@ export async function ensureProfile(supabase: SupabaseClient): Promise<void> {
   } = await supabase.auth.getUser();
   if (!user) return;
 
-  await supabase
-    .from("profiles")
-    .upsert(
-      { id: user.id, email: user.email ?? null },
-      { onConflict: "id", ignoreDuplicates: true },
-    );
+  const meta = user.user_metadata ?? {};
+  await supabase.from("profiles").upsert(
+    {
+      id: user.id,
+      email: user.email ?? null,
+      first_name: (meta.first_name as string | undefined) ?? null,
+      last_name: (meta.last_name as string | undefined) ?? null,
+    },
+    { onConflict: "id" },
+  );
 }

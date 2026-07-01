@@ -28,9 +28,13 @@ export function SidebarNav({
 }) {
   const pathname = usePathname();
 
+  // Only show shipped pages for now; "Coming soon" items stay routable
+  // (the pages still exist) but are hidden from the nav.
+  const visibleItems = navItems.filter((item) => !item.comingSoon);
+
   return (
     <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-3">
-      {navItems.map((item) => {
+      {visibleItems.map((item) => {
         const active = isActive(item.href, pathname);
         const Icon = item.icon;
         return (

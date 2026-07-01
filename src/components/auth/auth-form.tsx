@@ -17,6 +17,8 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const params = useSearchParams();
   const redirectedFrom = params.get("redirectedFrom") || "/dashboard";
 
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -42,10 +44,19 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
     try {
       if (isSignup) {
+        const first = firstName.trim();
+        const last = lastName.trim();
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
+            // Stored in user_metadata; the DB trigger copies these into the
+            // profiles row so the name is available immediately.
+            data: {
+              first_name: first || null,
+              last_name: last || null,
+              full_name: [first, last].filter(Boolean).join(" ") || null,
+            },
             emailRedirectTo:
               typeof window !== "undefined"
                 ? `${window.location.origin}/auth/callback`
@@ -122,6 +133,32 @@ export function AuthForm({ mode }: { mode: Mode }) {
       ) : null}
 
       <form onSubmit={handleSubmit} className="space-y-4">
+        {isSignup ? (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="first_name">First name</Label>
+              <Input
+                id="first_name"
+                autoComplete="given-name"
+                placeholder="Jane"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="last_name">Last name</Label>
+              <Input
+                id="last_name"
+                autoComplete="family-name"
+                placeholder="Doe"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+        ) : null}
         <div className="space-y-1.5">
           <Label htmlFor="email">Email</Label>
           <Input
