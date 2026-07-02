@@ -1,6 +1,7 @@
 import {
   LayoutDashboard,
   FlaskConical,
+  Split,
   Activity,
   Inbox,
   Boxes,
@@ -29,6 +30,7 @@ export interface NavItem {
 export const navItems: NavItem[] = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
   { label: "Playground", href: "/dashboard/playground", icon: FlaskConical },
+  { label: "Router", href: "/dashboard/router", icon: Split },
   { label: "Activity", href: "/dashboard/activity", icon: Activity, comingSoon: true },
   { label: "Requests", href: "/dashboard/requests", icon: Inbox, comingSoon: true },
   { label: "Models", href: "/dashboard/models", icon: Boxes, comingSoon: true },

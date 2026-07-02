@@ -386,4 +386,193 @@ export async function verifyPrompt(prompt: string): Promise<VerifyResult> {
   };
 }
 
+// ── Chat / grounded verification (Feature Prompts contract) ─────────────
+
+export type ChatStatus = Verdict | "NEEDS_CLARIFICATION";
+
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface Clarification {
+  question: string;
+  options: string[];
+}
+
+export interface SourceUsed {
+  type: "url" | "document";
+  ref: string;
+}
+
+export interface ChatVerifyResult {
+  status: ChatStatus;
+  verifiedResponse: string | null;
+  consensusScore: number | null;
+  agreement: { agree: number; total: number } | null;
+  models: VerifyModelResult[];
+  clarification: Clarification | null;
+  sourceUsed: SourceUsed | null;
+  raw: unknown;
+}
+
+export interface VerifyChatParams {
+  prompt: string;
+  messages?: ChatTurn[];
+  url?: string;
+  documentText?: string;
+}
+
+/** Bearer-auth header for the Guardian API key (backend requires it). */
+function authHeaders(apiKey?: string | null): Record<string, string> {
+  return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+}
+
+function normalizeChatStatus(v: unknown): ChatStatus {
+  const s = String(v ?? "").toUpperCase();
+  if (s.includes("CLARIF") || s.includes("NEEDS")) return "NEEDS_CLARIFICATION";
+  return normalizeVerdict(v);
+}
+
+function parseAgreement(
+  raw: Loose,
+  modelCount: number,
+): { agree: number; total: number } | null {
+  const agreeRaw = pick(raw, "agreement", "agree");
+  if (typeof agreeRaw === "string" && agreeRaw.includes("/")) {
+    const [a, t] = agreeRaw.split("/").map((s) => Number(s.trim()));
+    if (!Number.isNaN(a) && !Number.isNaN(t)) return { agree: a, total: t };
+  }
+  const agree = num(pick(raw, "agree", "agree_count", "votes_for"));
+  const total =
+    num(pick(raw, "total", "total_models", "vote_count")) ||
+    (modelCount || null);
+  return agree != null && total != null ? { agree, total } : null;
+}
+
+/** Multi-turn, optionally source-grounded verification. */
+export async function verifyChat(
+  params: VerifyChatParams,
+  apiKey?: string | null,
+): Promise<ChatVerifyResult> {
+  const body: Loose = { prompt: params.prompt };
+  if (params.messages?.length) body.messages = params.messages;
+  if (params.url) body.url = params.url;
+  if (params.documentText) body.document_text = params.documentText;
+
+  const raw = await apiFetch<Loose>("/v1/verify", {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: authHeaders(apiKey),
+    timeoutMs: 90000,
+  });
+
+  const modelsSrc = asArray(
+    pick(raw, "per_model", "models", "model_results", "votes", "breakdown"),
+  );
+  const models: VerifyModelResult[] = modelsSrc.map((m) => ({
+    name: String(pick(m, "model", "name") ?? "model"),
+    verdict:
+      pick(m, "ok") !== undefined
+        ? pick(m, "ok")
+          ? "PASS"
+          : "FLAGGED"
+        : pick(m, "verdict", "vote", "result")
+          ? normalizeVerdict(pick(m, "verdict", "vote", "result"))
+          : null,
+    score: num(pick(m, "score", "confidence")),
+    response: (pick(m, "answer", "response", "output", "text") as string) ?? null,
+  }));
+
+  const clarRaw = pick(raw, "clarification") as Loose | undefined;
+  const clarification: Clarification | null = clarRaw
+    ? {
+        question: String(pick(clarRaw, "question") ?? "Could you clarify?"),
+        options: (Array.isArray(clarRaw.options)
+          ? clarRaw.options
+          : []) as string[],
+      }
+    : null;
+
+  const srcRaw = pick(raw, "source_used", "sourceUsed") as Loose | undefined;
+  const sourceUsed: SourceUsed | null = srcRaw
+    ? {
+        type: String(pick(srcRaw, "type") ?? "url") === "document"
+          ? "document"
+          : "url",
+        ref: String(pick(srcRaw, "ref") ?? ""),
+      }
+    : null;
+
+  return {
+    status: normalizeChatStatus(pick(raw, "status", "verdict", "result")),
+    verifiedResponse:
+      (pick(raw, "verified_response", "verifiedResponse", "response", "output") as
+        | string
+        | null) ?? null,
+    consensusScore: num(
+      pick(raw, "consensus_score", "consensusScore", "score", "confidence"),
+    ),
+    agreement: parseAgreement(raw, models.length),
+    models,
+    clarification,
+    sourceUsed,
+    raw,
+  };
+}
+
+export interface ExtractResult {
+  ok: boolean;
+  text: string;
+  title?: string | null;
+  error?: string | null;
+}
+
+/** Extract the main readable text from a URL (POST /v1/extract). */
+export async function extractUrl(
+  url: string,
+  apiKey?: string | null,
+): Promise<ExtractResult> {
+  const raw = await apiFetch<Loose>("/v1/extract", {
+    method: "POST",
+    body: JSON.stringify({ url }),
+    headers: authHeaders(apiKey),
+    timeoutMs: 30000,
+  });
+  return {
+    ok: Boolean(pick(raw, "ok") ?? (pick(raw, "text") ? true : false)),
+    text: String(pick(raw, "text") ?? ""),
+    title: (pick(raw, "title") as string | undefined) ?? null,
+    error: (pick(raw, "error") as string | undefined) ?? null,
+  };
+}
+
+/** List available models for the router dropdown (GET /v1/models). */
+export async function fetchModels(apiKey?: string | null): Promise<string[]> {
+  const raw = await apiFetch<Loose>("/v1/models", {
+    headers: authHeaders(apiKey),
+    timeoutMs: 15000,
+  });
+  const list = pick(raw, "models");
+  return Array.isArray(list) ? list.map((m) => String(m)) : [];
+}
+
+/** Send content to a single chosen model (POST /v1/route). */
+export async function routeContent(
+  content: string,
+  model: string,
+  apiKey?: string | null,
+): Promise<{ model: string; answer: string }> {
+  const raw = await apiFetch<Loose>("/v1/route", {
+    method: "POST",
+    body: JSON.stringify({ content, model }),
+    headers: authHeaders(apiKey),
+    timeoutMs: 90000,
+  });
+  return {
+    model: String(pick(raw, "model") ?? model),
+    answer: String(pick(raw, "answer", "response", "output") ?? ""),
+  };
+}
+
 export { ApiError };
