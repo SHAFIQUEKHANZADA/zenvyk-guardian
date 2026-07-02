@@ -12,14 +12,17 @@ import { UserMenu } from "./user-menu";
 export function Topbar({
   email,
   name,
+  plan = "free",
 }: {
   email: string | null;
   name: string | null;
+  plan?: string;
 }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const title = titleForPath(pathname);
   const onOverview = pathname === "/dashboard";
+  const isPaid = plan === "pro" || plan === "enterprise";
 
   return (
     <>
@@ -45,6 +48,18 @@ export function Topbar({
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-3">
+          {isPaid ? (
+            <span className="hidden rounded-full border border-primary/30 bg-primary/15 px-2.5 py-0.5 text-xs font-medium text-primary sm:inline">
+              {plan === "enterprise" ? "Enterprise" : "Pro"}
+            </span>
+          ) : (
+            <Link
+              href="/pricing"
+              className="hidden rounded-full border border-border-strong px-2.5 py-1 text-xs font-medium text-foreground/90 hover:border-primary hover:text-primary sm:inline"
+            >
+              Upgrade to Pro
+            </Link>
+          )}
           <button
             className="relative rounded-lg p-2 text-muted hover:bg-surface-2 hover:text-foreground"
             aria-label="Notifications"
