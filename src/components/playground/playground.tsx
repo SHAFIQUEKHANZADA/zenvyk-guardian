@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import {
   verifyChat,
+  ApiError,
   type ChatVerifyResult,
   type ChatStatus,
   type ChatTurn,
@@ -75,6 +76,7 @@ export function Playground() {
   const [doc, setDoc] = useState<{ name: string; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [limitReached, setLimitReached] = useState(false);
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [keyLoaded, setKeyLoaded] = useState(false);
 
@@ -179,7 +181,12 @@ export function Playground() {
           ).catch(() => {});
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Verification failed.");
+        // 402 = monthly free quota used up -> show the upgrade prompt, not a raw error.
+        if (err instanceof ApiError && err.status === 402) {
+          setLimitReached(true);
+        } else {
+          setError(err instanceof Error ? err.message : "Verification failed.");
+        }
       } finally {
         setLoading(false);
       }
@@ -283,6 +290,27 @@ export function Playground() {
           </div>
         ) : null}
       </div>
+
+      {limitReached ? (
+        <div className="mt-3 rounded-xl border border-primary/40 bg-primary/10 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">
+                You&apos;ve used all 10 free verifications this month.
+              </p>
+              <p className="mt-0.5 text-xs text-muted">
+                Upgrade to Pro for 100,000 verifications/month and full access.
+              </p>
+            </div>
+            <Link
+              href="/pricing"
+              className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm shadow-primary/20 transition-colors hover:bg-primary/90"
+            >
+              Upgrade to Pro →
+            </Link>
+          </div>
+        </div>
+      ) : null}
 
       {error ? (
         <Alert tone="error" className="mt-3">

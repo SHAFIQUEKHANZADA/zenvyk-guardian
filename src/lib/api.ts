@@ -126,14 +126,36 @@ async function apiFetch<T>(
     init?.timeoutMs ?? 20000,
   );
 
+  // Build headers. If the caller didn't pass an explicit API key, fall back to
+  // the logged-in user's Supabase access token so the backend can identify them
+  // (the backend accepts either a Guardian API key or a Supabase login token).
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...((init?.headers as Record<string, string>) ?? {}),
+  };
+  if (!headers["Authorization"] && !headers["authorization"]) {
+    try {
+      if (typeof window !== "undefined") {
+        const [{ createClient }, { isSupabaseConfigured }] = await Promise.all([
+          import("@/lib/supabase/client"),
+          import("@/lib/supabase/config"),
+        ]);
+        if (isSupabaseConfigured) {
+          const { data } = await createClient().auth.getSession();
+          const token = data.session?.access_token;
+          if (token) headers["Authorization"] = `Bearer ${token}`;
+        }
+      }
+    } catch {
+      /* not signed in / supabase unavailable — request proceeds unauthenticated */
+    }
+  }
+
   try {
     const res = await fetch(`${API_URL}${path}`, {
       ...init,
       signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
-      },
+      headers,
     });
 
     if (!res.ok) {
