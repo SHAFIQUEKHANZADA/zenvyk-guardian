@@ -81,7 +81,8 @@ export function AuthForm({ mode }: { mode: Mode }) {
         if (error) throw error;
       }
 
-      router.push(redirectedFrom);
+      // New signups pick a plan first (FIX 3); logins honor their original target.
+      router.push(isSignup ? "/welcome" : redirectedFrom);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Authentication failed.");

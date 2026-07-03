@@ -597,4 +597,186 @@ export async function routeContent(
   };
 }
 
+// ── Guardian Resource Intelligence (GRI) ────────────────────────────────
+export type GriRisk = "LOW" | "MEDIUM" | "HIGH";
+export type GriVerdict =
+  | "PROCEED"
+  | "PHASE"
+  | "REDUCE"
+  | "QUEUE"
+  | "SWITCH_PROVIDER";
+
+export interface GriDeliverable {
+  name: string;
+  type: string;
+  est_tokens: number;
+  est_runtime_sec: number;
+}
+
+export interface GriQuota {
+  plan: string;
+  limit: number | null;
+  used: number;
+  remaining: number | null;
+}
+
+export interface GriProvider {
+  key: string;
+  name: string;
+  remaining_budget_pct: number;
+  est_needed_pct: number;
+  completion_probability: number;
+  risk: GriRisk;
+  score: number;
+  health: string;
+  latency_ms: number | null;
+}
+
+export interface GriPhase {
+  name: string;
+  deliverables: string[];
+  est_tokens: number;
+  est_runtime_sec: number;
+  est_ai_calls: number;
+}
+
+export interface GriRecommendation {
+  verdict: GriVerdict;
+  phases: GriPhase[] | null;
+  best_provider: string;
+  message: string;
+  alternatives: string[];
+}
+
+export interface GriAnalysis {
+  complexity_score: number;
+  estimated_tokens: number;
+  estimated_ai_calls: number;
+  estimated_runtime_sec: number;
+  estimated_cost_usd: number;
+  deliverables: GriDeliverable[];
+  quota: GriQuota;
+  completion_probability: number;
+  risk: GriRisk;
+  recommendation: GriRecommendation;
+  providers: GriProvider[];
+  project_id: string | null;
+  presentation: boolean;
+}
+
+export interface GriExecuteResult {
+  project_id: string;
+  phase_index: number;
+  status: string;
+  provider: string;
+  output: { deliverables: string[]; text: string; provider: string; tokens: number };
+  tokens: number;
+  cost_usd: number;
+  saved_at: string;
+  next_phase_index: number | null;
+  message: string;
+}
+
+export interface GriResumeResult {
+  project_id: string;
+  status: string;
+  last_checkpoint: unknown;
+  next_phase_index: number | null;
+  next_phase: { idx: number; name: string; status: string } | null;
+  completed_phases: number;
+  total_phases: number;
+  message: string;
+}
+
+export interface GriProviderStatus {
+  providers: {
+    key: string;
+    name: string;
+    health: string;
+    latency_ms: number | null;
+    remaining_budget_pct: number;
+    budget_usd: number;
+    spent_usd: number;
+  }[];
+  presentation: boolean;
+}
+
+export interface GriDashboard {
+  capacity: { plan: string; used: number; limit: number | null; used_pct: number };
+  est_remaining_runtime_sec: number | null;
+  projects_in_queue: number;
+  current_provider: string;
+  avg_completion_success: number | null;
+  guardian_status: string;
+  risk: string;
+  presentation: boolean;
+}
+
+export interface AnalyzeParams {
+  prompt: string;
+  deliverables?: string[];
+  attachments?: { name: string; tokens?: number }[];
+  history_tokens?: number;
+}
+
+const demoSuffix = (demo?: boolean) => (demo ? "?demo=1" : "");
+
+/** Analyze a project BEFORE running it — the "flight plan before takeoff". */
+export async function analyzeProject(
+  params: AnalyzeParams,
+  demo = false,
+): Promise<GriAnalysis> {
+  return apiFetch<GriAnalysis>(`/v1/resource/analyze${demoSuffix(demo)}`, {
+    method: "POST",
+    body: JSON.stringify(params),
+    timeoutMs: 45000,
+  });
+}
+
+/** Run one phase (real work) and auto-checkpoint it. */
+export async function executePhase(
+  projectId: string,
+  phaseIndex: number,
+): Promise<GriExecuteResult> {
+  return apiFetch<GriExecuteResult>("/v1/project/execute", {
+    method: "POST",
+    body: JSON.stringify({ project_id: projectId, phase_index: phaseIndex }),
+    timeoutMs: 120000,
+  });
+}
+
+/** Manually save a checkpoint. */
+export async function checkpointPhase(
+  projectId: string,
+  phaseIndex: number,
+  output: unknown,
+): Promise<{ saved_at: string; message: string }> {
+  return apiFetch("/v1/project/checkpoint", {
+    method: "POST",
+    body: JSON.stringify({ project_id: projectId, phase_index: phaseIndex, output }),
+  });
+}
+
+/** Resume from the last checkpoint. */
+export async function resumeProject(projectId: string): Promise<GriResumeResult> {
+  return apiFetch<GriResumeResult>("/v1/project/resume", {
+    method: "POST",
+    body: JSON.stringify({ project_id: projectId }),
+  });
+}
+
+/** Live provider health/latency + Guardian's own budget per key. */
+export async function fetchProviderStatus(demo = false): Promise<GriProviderStatus> {
+  return apiFetch<GriProviderStatus>(`/v1/provider/status${demoSuffix(demo)}`, {
+    timeoutMs: 20000,
+  });
+}
+
+/** Bottom resource strip: capacity, runtime, queue, provider, success, status. */
+export async function fetchResourceDashboard(demo = false): Promise<GriDashboard> {
+  return apiFetch<GriDashboard>(`/v1/resource/dashboard${demoSuffix(demo)}`, {
+    timeoutMs: 15000,
+  });
+}
+
 export { ApiError };

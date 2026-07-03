@@ -25,7 +25,7 @@ export const PLANS: Plan[] = [
     price: "$0",
     tagline: "Get started with single-model verification.",
     features: [
-      "1,000 verified requests/mo",
+      "10 verified requests/day",
       "Single-model verification",
       "Basic hallucination blocking",
       "Dashboard access",

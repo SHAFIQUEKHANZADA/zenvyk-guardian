@@ -296,10 +296,11 @@ export function Playground() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-foreground">
-                You&apos;ve used all 10 free verifications this month.
+                You&apos;ve used all 10 free verifications for today.
               </p>
               <p className="mt-0.5 text-xs text-muted">
-                Upgrade to Pro for 100,000 verifications/month and full access.
+                Your free quota resets tomorrow — or upgrade to Pro for 100,000
+                verifications/month and the full 5-model ensemble.
               </p>
             </div>
             <Link
