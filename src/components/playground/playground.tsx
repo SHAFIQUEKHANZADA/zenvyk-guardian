@@ -11,6 +11,9 @@ import {
   Paperclip,
   X,
   KeyRound,
+  MessageSquare,
+  Trash2,
+  PanelLeft,
 } from "lucide-react";
 import {
   verifyChat,
@@ -22,6 +25,14 @@ import {
 import { fetchActiveApiKey } from "@/lib/api-key";
 import { logVerification } from "@/lib/verifications";
 import { extractFileText } from "@/lib/extract-file";
+import {
+  listConversations,
+  getConversationMessages,
+  upsertConversation,
+  deleteConversation,
+  titleFromMessages,
+  type ConversationSummary,
+} from "@/lib/conversations";
 import { Button } from "@/components/ui/button";
 import { Textarea, Input } from "@/components/ui/input";
 import { Alert, Spinner } from "@/components/ui/feedback";
@@ -80,6 +91,12 @@ export function Playground() {
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [keyLoaded, setKeyLoaded] = useState(false);
 
+  // Chat history (persisted per-user in Supabase).
+  const [history, setHistory] = useState<ConversationSummary[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false); // mobile drawer
+  const convIdRef = useRef<string | null>(null);
+
   const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -92,31 +109,92 @@ export function Playground() {
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }, [input]);
 
-  // Fetch the user's API key (backend requires it) + restore prior chat.
+  const refreshHistory = useCallback(() => {
+    listConversations()
+      .then(setHistory)
+      .catch(() => {});
+  }, []);
+
+  // Fetch the user's API key + restore the in-tab chat + load history list.
   useEffect(() => {
     fetchActiveApiKey()
       .then((k) => setApiKey(k))
       .finally(() => setKeyLoaded(true));
+    refreshHistory();
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const saved = JSON.parse(raw) as { messages?: ChatMessage[] };
+        const saved = JSON.parse(raw) as { messages?: ChatMessage[]; convId?: string | null };
         // eslint-disable-next-line react-hooks/set-state-in-effect
         if (saved.messages?.length) setMessages(saved.messages);
+        if (saved.convId) {
+          convIdRef.current = saved.convId;
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setActiveId(saved.convId);
+        }
       }
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [refreshHistory]);
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ messages }));
+      sessionStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ messages, convId: convIdRef.current }),
+      );
     } catch {
       /* ignore */
     }
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages, loading]);
+
+  // Save/refresh the conversation in Supabase after each exchange.
+  const persist = useCallback(
+    async (msgs: ChatMessage[]) => {
+      if (!msgs.length) return;
+      const id = await upsertConversation(
+        convIdRef.current,
+        titleFromMessages(msgs),
+        msgs,
+      );
+      if (id) {
+        if (convIdRef.current !== id) {
+          convIdRef.current = id;
+          setActiveId(id);
+        }
+        refreshHistory();
+      }
+    },
+    [refreshHistory],
+  );
+
+  const openConversation = useCallback(async (id: string) => {
+    const msgs = await getConversationMessages<ChatMessage>(id);
+    if (msgs) {
+      setMessages(msgs);
+      convIdRef.current = id;
+      setActiveId(id);
+      setError(null);
+      setLimitReached(false);
+      setShowHistory(false);
+    }
+  }, []);
+
+  const removeConversation = useCallback(
+    async (e: React.MouseEvent, id: string) => {
+      e.stopPropagation();
+      await deleteConversation(id);
+      if (convIdRef.current === id) {
+        setMessages([]);
+        convIdRef.current = null;
+        setActiveId(null);
+      }
+      refreshHistory();
+    },
+    [refreshHistory],
+  );
 
   const send = useCallback(
     async (text: string) => {
@@ -189,6 +267,9 @@ export function Playground() {
             Math.round(performance.now() - startedAt),
           ).catch(() => {});
         }
+
+        // Persist the whole conversation (incl. clarifications) to chat history.
+        void persist([...messages, userMsg, assistant]);
       } catch (err) {
         // 402 = monthly free quota used up -> show the upgrade prompt, not a raw error.
         if (err instanceof ApiError && err.status === 402) {
@@ -200,7 +281,7 @@ export function Playground() {
         setLoading(false);
       }
     },
-    [messages, url, doc, apiKey, loading],
+    [messages, url, doc, apiKey, loading, persist],
   );
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -220,23 +301,68 @@ export function Playground() {
     setMessages([]);
     setError(null);
     setInput("");
+    setLimitReached(false);
+    convIdRef.current = null;
+    setActiveId(null);
+    setShowHistory(false);
   }
 
   const empty = messages.length === 0;
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-7rem)] w-full max-w-3xl flex-col">
-      {/* Slim top bar (topbar already shows the "Playground" title) */}
-      <div className="flex items-center justify-between pb-3">
-        <span className="inline-flex items-center gap-1.5 text-xs text-muted">
-          <ShieldCheck className="h-3.5 w-3.5 text-primary" />
-          Every reply is cross-checked by the consensus engine
-        </span>
-        <Button variant="secondary" size="sm" onClick={newChat} disabled={empty}>
-          <Plus className="h-4 w-4" />
-          New chat
-        </Button>
-      </div>
+    <div className="relative flex h-[calc(100vh-7rem)] gap-5">
+      {/* Chat history — desktop sidebar */}
+      <aside className="hidden w-64 shrink-0 flex-col md:flex">
+        <ChatHistoryList
+          history={history}
+          activeId={activeId}
+          onNew={newChat}
+          onOpen={openConversation}
+          onDelete={removeConversation}
+        />
+      </aside>
+
+      {/* Chat history — mobile drawer */}
+      {showHistory ? (
+        <div className="absolute inset-0 z-30 md:hidden">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowHistory(false)}
+          />
+          <div className="absolute left-0 top-0 flex h-full w-72 flex-col bg-sidebar p-3 shadow-xl">
+            <ChatHistoryList
+              history={history}
+              activeId={activeId}
+              onNew={newChat}
+              onOpen={openConversation}
+              onDelete={removeConversation}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {/* Chat column */}
+      <div className="mx-auto flex h-full w-full max-w-3xl flex-col">
+        {/* Slim top bar (topbar already shows the "Playground" title) */}
+        <div className="flex items-center justify-between pb-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowHistory(true)}
+              title="Chat history"
+              className="rounded-lg p-1.5 text-muted transition-colors hover:bg-surface-2 hover:text-foreground md:hidden"
+            >
+              <PanelLeft className="h-[18px] w-[18px]" />
+            </button>
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted">
+              <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+              Every reply is cross-checked by the consensus engine
+            </span>
+          </div>
+          <Button variant="secondary" size="sm" onClick={newChat} disabled={empty}>
+            <Plus className="h-4 w-4" />
+            New chat
+          </Button>
+        </div>
 
       {keyLoaded && !apiKey ? (
         <Alert tone="info" className="mb-3">
@@ -411,7 +537,77 @@ export function Playground() {
           </Button>
         </div>
       </div>
+      </div>
     </div>
+  );
+}
+
+function ChatHistoryList({
+  history,
+  activeId,
+  onNew,
+  onOpen,
+  onDelete,
+}: {
+  history: ConversationSummary[];
+  activeId: string | null;
+  onNew: () => void;
+  onOpen: (id: string) => void;
+  onDelete: (e: React.MouseEvent, id: string) => void;
+}) {
+  return (
+    <>
+      <Button
+        variant="secondary"
+        size="sm"
+        className="mb-3 w-full justify-start"
+        onClick={onNew}
+      >
+        <Plus className="h-4 w-4" />
+        New chat
+      </Button>
+      <p className="mb-1.5 px-2 text-[11px] font-medium uppercase tracking-wide text-muted-2">
+        Recent chats
+      </p>
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        {history.length === 0 ? (
+          <p className="px-2 py-2 text-xs text-muted-2">
+            No saved chats yet — your conversations will appear here.
+          </p>
+        ) : (
+          <ul className="space-y-0.5">
+            {history.map((c) => (
+              <li key={c.id}>
+                <div
+                  className={cn(
+                    "group flex items-center gap-1 rounded-lg pr-1 transition-colors",
+                    activeId === c.id ? "bg-primary/12" : "hover:bg-surface-2",
+                  )}
+                >
+                  <button
+                    onClick={() => onOpen(c.id)}
+                    className={cn(
+                      "flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left text-sm",
+                      activeId === c.id ? "text-foreground" : "text-muted",
+                    )}
+                  >
+                    <MessageSquare className="h-4 w-4 shrink-0 text-muted-2" />
+                    <span className="truncate">{c.title}</span>
+                  </button>
+                  <button
+                    onClick={(e) => onDelete(e, c.id)}
+                    title="Delete chat"
+                    className="hidden shrink-0 rounded p-1.5 text-muted-2 hover:text-blocked group-hover:block"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </>
   );
 }
 
