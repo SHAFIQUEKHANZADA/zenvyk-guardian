@@ -82,6 +82,15 @@ export function Playground() {
 
   const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grow the composer with its content (up to a max height).
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  }, [input]);
 
   // Fetch the user's API key (backend requires it) + restore prior chat.
   useEffect(() => {
@@ -216,15 +225,13 @@ export function Playground() {
   const empty = messages.length === 0;
 
   return (
-    <div className="flex h-[calc(100vh-8.5rem)] flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between pb-4">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">Playground</h2>
-          <p className="text-sm text-muted">
-            Chat with the Guardian consensus engine — every reply is verified.
-          </p>
-        </div>
+    <div className="mx-auto flex h-[calc(100vh-7rem)] w-full max-w-3xl flex-col">
+      {/* Slim top bar (topbar already shows the "Playground" title) */}
+      <div className="flex items-center justify-between pb-3">
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted">
+          <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+          Every reply is cross-checked by the consensus engine
+        </span>
         <Button variant="secondary" size="sm" onClick={newChat} disabled={empty}>
           <Plus className="h-4 w-4" />
           New chat
@@ -246,27 +253,29 @@ export function Playground() {
         </Alert>
       ) : null}
 
-      {/* Messages */}
+      {/* Messages — open, chat-style column */}
       <div
         ref={listRef}
-        className="flex-1 space-y-4 overflow-y-auto rounded-xl border border-border bg-surface p-4"
+        className="flex-1 space-y-6 overflow-y-auto scroll-smooth px-1 py-2"
       >
         {empty ? (
-          <div className="flex h-full flex-col items-center justify-center text-center">
-            <span className="mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-surface-2 text-primary">
-              <ShieldCheck className="h-6 w-6" />
+          <div className="flex h-full flex-col items-center justify-center px-4 text-center">
+            <span className="mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/20">
+              <ShieldCheck className="h-7 w-7" />
             </span>
-            <p className="text-sm font-medium">Start a verified conversation</p>
-            <p className="mt-1 max-w-sm text-xs text-muted">
-              Ask anything. Attach a link or document to verify the answer
-              against a real source.
+            <h3 className="text-lg font-semibold tracking-tight">
+              Start a verified conversation
+            </h3>
+            <p className="mt-1.5 max-w-md text-sm text-muted">
+              Ask anything — every answer is cross-checked by 5 models. Attach a
+              link or document to verify against a real source.
             </p>
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
+            <div className="mt-6 flex flex-wrap justify-center gap-2">
               {EXAMPLES.map((ex) => (
                 <button
                   key={ex}
                   onClick={() => setInput(ex)}
-                  className="rounded-full border border-border bg-surface-2 px-3 py-1 text-xs text-muted hover:text-foreground"
+                  className="rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs text-foreground/80 transition-colors hover:border-primary/40 hover:text-foreground"
                 >
                   {ex}
                 </button>
@@ -284,9 +293,12 @@ export function Playground() {
         )}
 
         {loading ? (
-          <div className="flex items-center gap-2 text-sm text-muted">
+          <div className="flex items-center gap-2.5 text-sm text-muted">
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-surface-2 text-primary">
+              <ShieldCheck className="h-4 w-4" />
+            </span>
             <Spinner className="h-4 w-4" />
-            Running multi-model verification…
+            <span className="animate-pulse">Running multi-model verification…</span>
           </div>
         ) : null}
       </div>
@@ -343,36 +355,40 @@ export function Playground() {
         </div>
       ) : null}
 
-      {/* Composer */}
-      <div className="mt-3 rounded-xl border border-border bg-surface-2 p-2">
+      {/* Composer — large, auto-growing */}
+      <div className="mt-3 rounded-2xl border border-border bg-surface-2 p-3 shadow-sm transition-colors focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/15">
         <Textarea
-          rows={2}
-          placeholder="Message Guardian…  (⌘/Ctrl + Enter to send)"
+          ref={taRef}
+          rows={1}
+          placeholder="Message Guardian…"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") send(input);
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send(input);
+            }
           }}
-          className="border-0 bg-transparent focus-visible:ring-0"
+          className="max-h-[220px] min-h-[52px] resize-none border-0 bg-transparent px-1.5 text-[15px] leading-relaxed focus-visible:ring-0"
         />
-        <div className="flex items-center justify-between px-1 pt-1">
-          <div className="flex items-center gap-1">
+        <div className="flex items-center justify-between px-0.5 pt-1.5">
+          <div className="flex items-center gap-0.5">
             <button
               onClick={() => setShowUrl((s) => !s)}
               title="Verify against a link"
               className={cn(
-                "rounded-lg p-2 text-muted hover:bg-surface-3 hover:text-foreground",
-                showUrl && "text-primary",
+                "rounded-lg p-2 text-muted transition-colors hover:bg-surface-3 hover:text-foreground",
+                showUrl && "bg-primary/10 text-primary",
               )}
             >
-              <Link2 className="h-4 w-4" />
+              <Link2 className="h-[18px] w-[18px]" />
             </button>
             <button
               onClick={() => fileRef.current?.click()}
               title="Attach a document (.txt, .pdf)"
-              className="rounded-lg p-2 text-muted hover:bg-surface-3 hover:text-foreground"
+              className="rounded-lg p-2 text-muted transition-colors hover:bg-surface-3 hover:text-foreground"
             >
-              <Paperclip className="h-4 w-4" />
+              <Paperclip className="h-[18px] w-[18px]" />
             </button>
             <input
               ref={fileRef}
@@ -381,8 +397,15 @@ export function Playground() {
               className="hidden"
               onChange={onFile}
             />
+            <span className="ml-1 hidden text-[11px] text-muted-2 sm:inline">
+              Enter to send · Shift+Enter for a new line
+            </span>
           </div>
-          <Button onClick={() => send(input)} disabled={loading || !input.trim()}>
+          <Button
+            size="md"
+            onClick={() => send(input)}
+            disabled={loading || !input.trim()}
+          >
             {loading ? <Spinner /> : <SendHorizonal className="h-4 w-4" />}
             Send
           </Button>
@@ -412,7 +435,7 @@ function Chip({
 function UserBubble({ message }: { message: ChatMessage }) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-primary/15 px-4 py-2.5 text-sm">
+      <div className="max-w-[85%] rounded-2xl rounded-br-md bg-primary/15 px-4 py-3 text-[15px] leading-relaxed">
         <p className="whitespace-pre-wrap text-foreground">{message.content}</p>
         {message.sourceLabel ? (
           <p className="mt-1.5 truncate text-[11px] text-muted">
@@ -438,7 +461,10 @@ function AssistantBubble({
   const isClarify = status === "NEEDS_CLARIFICATION";
 
   return (
-    <div className="flex justify-start">
+    <div className="flex justify-start gap-3">
+      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-surface-2 text-primary ring-1 ring-border">
+        <ShieldCheck className="h-[18px] w-[18px]" />
+      </span>
       <div className="max-w-[85%] space-y-2.5">
         <div className="flex items-center gap-2">
           <span
@@ -467,7 +493,7 @@ function AssistantBubble({
           ) : null}
         </div>
 
-        <div className="rounded-2xl rounded-bl-sm border border-border bg-surface-2 px-4 py-3 text-sm">
+        <div className="rounded-2xl rounded-bl-md border border-border bg-surface-2 px-4 py-3 text-[15px] leading-relaxed">
           <p className="whitespace-pre-wrap text-foreground/90">
             {message.content}
           </p>
