@@ -449,7 +449,8 @@ function AssistantBubble({
           >
             {s.label}
           </span>
-          {result?.consensusScore != null ? (
+          {/* No verification runs on a clarifying question — hide consensus/agreement. */}
+          {!isClarify && result?.consensusScore != null ? (
             <span className="text-[11px] text-muted">
               consensus{" "}
               {formatPercent(
@@ -459,7 +460,7 @@ function AssistantBubble({
               )}
             </span>
           ) : null}
-          {result?.agreement ? (
+          {!isClarify && result?.agreement ? (
             <span className="text-[11px] text-muted">
               {result.agreement.agree}/{result.agreement.total} agree
             </span>
