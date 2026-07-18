@@ -779,4 +779,73 @@ export async function fetchResourceDashboard(demo = false): Promise<GriDashboard
   });
 }
 
+// ── KYB — Business verification ─────────────────────────────────────────
+export type KybDecision = "AUTO_APPROVE" | "FLAG" | "REJECT";
+
+export interface KybSourceResult {
+  key: string;
+  name: string;
+  weight: number;
+  verdict: "AGREES" | "PARTIAL" | "NO_MATCH" | "ERROR";
+  fields: Record<string, unknown>;
+  mode: "live" | "sample" | "error";
+  detail: string;
+  match_ratio?: number;
+}
+
+export interface KybResult {
+  decision: KybDecision;
+  trust_score: number;
+  risk_score: number;
+  confidence: number;
+  consensus: { agree: number; total: number };
+  watchlist_hit: boolean;
+  field_consensus: Record<string, { agree: number; total: number }>;
+  sources: KybSourceResult[];
+  sample: boolean;
+  message: string;
+  business: Record<string, unknown>;
+  next: string;
+}
+
+export interface BusinessInput {
+  name: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  ein?: string;
+  website?: string;
+  phone?: string;
+  industry?: string;
+}
+
+/** Verify a business across 5 sources (3-of-5 consensus). */
+export async function verifyBusiness(
+  business: BusinessInput,
+  scenario?: string,
+  demo = false,
+): Promise<KybResult> {
+  return apiFetch<KybResult>(`/v1/kyb/verify${demo ? "?demo=1" : ""}`, {
+    method: "POST",
+    body: JSON.stringify({ business, scenario }),
+    timeoutMs: 45000,
+  });
+}
+
+export interface KybSourceStatus {
+  key: string;
+  name: string;
+  weight: number;
+  live: boolean;
+}
+
+/** Which KYB sources are live (key set) vs sample-only. */
+export async function fetchKybSources(): Promise<KybSourceStatus[]> {
+  const raw = await apiFetch<{ sources: KybSourceStatus[] }>("/v1/kyb/sources", {
+    timeoutMs: 10000,
+  });
+  return raw.sources ?? [];
+}
+
 export { ApiError };
