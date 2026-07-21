@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -8,9 +8,13 @@ import {
   ChevronsRight,
   ChevronDown,
   LifeBuoy,
+  Sparkles,
+  Settings,
+  CreditCard,
 } from "lucide-react";
 import { Logo, LogoMark } from "@/components/brand";
 import { navItems } from "./nav";
+import { planLabel } from "@/lib/plans";
 import { cn } from "@/lib/utils";
 
 function isActive(href: string, pathname: string) {
@@ -80,7 +84,90 @@ export function SidebarNav({
   );
 }
 
-export function Sidebar() {
+function WorkspaceMenu({ plan, collapsed }: { plan: string; collapsed: boolean }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const isPaid = plan === "pro" || plan === "enterprise";
+  const label = planLabel(plan);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  return (
+    <div className="relative px-3 pt-3" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          "flex w-full items-center gap-2.5 rounded-lg border border-border bg-surface px-2.5 py-2 text-left transition-colors hover:border-border-strong",
+          collapsed && "justify-center px-0",
+        )}
+      >
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-gradient-to-br from-emerald-400 to-teal-600 text-sm font-bold text-emerald-950">
+          Z
+        </span>
+        {!collapsed ? (
+          <>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold">My Workspace</span>
+              <span className="block truncate text-[11px] text-muted">{label} plan</span>
+            </span>
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 shrink-0 text-muted-2 transition-transform",
+                open && "rotate-180",
+              )}
+            />
+          </>
+        ) : null}
+      </button>
+
+      {open && !collapsed ? (
+        <div className="absolute inset-x-3 top-full z-40 mt-1 overflow-hidden rounded-lg border border-border bg-surface shadow-xl">
+          <div className="border-b border-border px-3 py-2">
+            <p className="text-xs font-semibold">My Workspace</p>
+            <p className="text-[11px] text-muted">Current plan: {label}</p>
+          </div>
+          <div className="p-1">
+            {!isPaid ? (
+              <Link
+                href="/pricing"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm font-medium text-primary hover:bg-primary/10"
+              >
+                <Sparkles className="h-4 w-4" />
+                Upgrade to Pro
+              </Link>
+            ) : null}
+            <Link
+              href="/pricing"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-muted hover:bg-surface-2 hover:text-foreground"
+            >
+              <CreditCard className="h-4 w-4" />
+              Plans &amp; billing
+            </Link>
+            <Link
+              href="/dashboard/settings"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-muted hover:bg-surface-2 hover:text-foreground"
+            >
+              <Settings className="h-4 w-4" />
+              Settings
+            </Link>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function Sidebar({ plan = "free" }: { plan?: string }) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -98,31 +185,7 @@ export function Sidebar() {
       </div>
 
       {/* Workspace switcher */}
-      <div className="px-3 pt-3">
-        <button
-          className={cn(
-            "flex w-full items-center gap-2.5 rounded-lg border border-border bg-surface px-2.5 py-2 text-left transition-colors hover:border-border-strong",
-            collapsed && "justify-center px-0",
-          )}
-        >
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-gradient-to-br from-emerald-400 to-teal-600 text-sm font-bold text-emerald-950">
-            Z
-          </span>
-          {!collapsed ? (
-            <>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">
-                  My Workspace
-                </span>
-                <span className="block truncate text-[11px] text-muted">
-                  Free plan
-                </span>
-              </span>
-              <ChevronDown className="h-4 w-4 shrink-0 text-muted-2" />
-            </>
-          ) : null}
-        </button>
-      </div>
+      <WorkspaceMenu plan={plan} collapsed={collapsed} />
 
       <SidebarNav collapsed={collapsed} />
 
