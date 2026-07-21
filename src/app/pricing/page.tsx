@@ -76,7 +76,7 @@ export default async function PricingPage() {
         <p className="mt-10 text-center text-xs text-muted-2">
           Prices in USD. Pro includes a 14-day free trial — cancel anytime from
           the billing portal. Need something custom?{" "}
-          <a href="mailto:reid@zenvyk.com" className="text-primary hover:underline">
+          <a href="mailto:rrichards@zenvyk.com" className="text-primary hover:underline">
             Talk to sales
           </a>
           .

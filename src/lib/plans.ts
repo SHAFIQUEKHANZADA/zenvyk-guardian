@@ -16,7 +16,7 @@ export interface Plan {
   popular?: boolean;
 }
 
-export const SALES_EMAIL = "reid@zenvyk.com";
+export const SALES_EMAIL = "rrichards@zenvyk.com";
 
 export const PLANS: Plan[] = [
   {
