@@ -65,6 +65,19 @@ export function AuthForm({ mode }: { mode: Mode }) {
         });
         if (error) throw error;
 
+        // Supabase returns a "decoy" user with an empty identities array when the
+        // email is ALREADY registered (anti-enumeration) — no email is sent. Detect
+        // that and tell the user to log in instead of falsely saying "check inbox".
+        if (
+          data.user &&
+          Array.isArray(data.user.identities) &&
+          data.user.identities.length === 0
+        ) {
+          setError("This email already has an account. Please log in instead.");
+          setLoading(false);
+          return;
+        }
+
         // If email confirmation is required, there's no active session yet.
         if (!data.session) {
           setNotice(
