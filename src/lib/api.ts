@@ -472,23 +472,8 @@ function parseAgreement(
   return agree != null && total != null ? { agree, total } : null;
 }
 
-/** Multi-turn, optionally source-grounded verification. */
-export async function verifyChat(
-  params: VerifyChatParams,
-  apiKey?: string | null,
-): Promise<ChatVerifyResult> {
-  const body: Loose = { prompt: params.prompt };
-  if (params.messages?.length) body.messages = params.messages;
-  if (params.url) body.url = params.url;
-  if (params.documentText) body.document_text = params.documentText;
-
-  const raw = await apiFetch<Loose>("/v1/verify", {
-    method: "POST",
-    body: JSON.stringify(body),
-    headers: authHeaders(apiKey),
-    timeoutMs: 90000,
-  });
-
+/** Normalise a raw /v1/verify payload into the stable chat view-model. */
+export function normalizeChatResult(raw: Loose): ChatVerifyResult {
   const modelsSrc = asArray(
     pick(raw, "per_model", "models", "model_results", "votes", "breakdown"),
   );
@@ -540,6 +525,83 @@ export async function verifyChat(
     clarification,
     sourceUsed,
     raw,
+  };
+}
+
+function verifyBody(params: VerifyChatParams): Loose {
+  const body: Loose = { prompt: params.prompt };
+  if (params.messages?.length) body.messages = params.messages;
+  if (params.url) body.url = params.url;
+  if (params.documentText) body.document_text = params.documentText;
+  return body;
+}
+
+/** Multi-turn, optionally source-grounded verification (synchronous). */
+export async function verifyChat(
+  params: VerifyChatParams,
+  apiKey?: string | null,
+): Promise<ChatVerifyResult> {
+  const raw = await apiFetch<Loose>("/v1/verify", {
+    method: "POST",
+    body: JSON.stringify(verifyBody(params)),
+    headers: authHeaders(apiKey),
+    timeoutMs: 90000,
+  });
+  return normalizeChatResult(raw);
+}
+
+// ── Background verification (submit + poll; survives leaving the page) ────
+export interface VerifyJobSubmit {
+  /** Set when the verification is running in the background — poll this. */
+  jobId: string | null;
+  /** Set when the answer is available immediately (e.g. a clarifying question). */
+  result: ChatVerifyResult | null;
+}
+
+export interface VerifyJobStatus {
+  status: "pending" | "done" | "error";
+  result: ChatVerifyResult | null;
+  error: string | null;
+}
+
+/**
+ * Submit a verification that keeps running server-side even if the user leaves.
+ * Returns a `jobId` to poll, OR an immediate `result` (a first-turn clarifying
+ * question needs no background work). A 402 (quota) throws an ApiError, exactly
+ * like the synchronous path.
+ */
+export async function submitVerifyJob(
+  params: VerifyChatParams,
+  apiKey?: string | null,
+): Promise<VerifyJobSubmit> {
+  const raw = await apiFetch<Loose>("/v1/verify/async", {
+    method: "POST",
+    body: JSON.stringify(verifyBody(params)),
+    headers: authHeaders(apiKey),
+    timeoutMs: 30000,
+  });
+
+  const jobId = pick(raw, "job_id", "jobId");
+  if (jobId) return { jobId: String(jobId), result: null };
+  // No job id → the backend answered inline (clarification).
+  return { jobId: null, result: normalizeChatResult(raw) };
+}
+
+/** Poll a background verification job once. */
+export async function fetchVerifyJob(
+  jobId: string,
+  apiKey?: string | null,
+): Promise<VerifyJobStatus> {
+  const raw = await apiFetch<Loose>(
+    `/v1/verify/status?job_id=${encodeURIComponent(jobId)}`,
+    { headers: authHeaders(apiKey), timeoutMs: 15000 },
+  );
+  const status = String(pick(raw, "status") ?? "pending") as VerifyJobStatus["status"];
+  const resultRaw = pick(raw, "result") as Loose | undefined;
+  return {
+    status,
+    result: status === "done" && resultRaw ? normalizeChatResult(resultRaw) : null,
+    error: (pick(raw, "error") as string | undefined) ?? null,
   };
 }
 

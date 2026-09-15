@@ -16,7 +16,8 @@ import {
   PanelLeft,
 } from "lucide-react";
 import {
-  verifyChat,
+  submitVerifyJob,
+  fetchVerifyJob,
   ApiError,
   type ChatVerifyResult,
   type ChatStatus,
@@ -46,6 +47,12 @@ interface ChatMessage {
   content: string;
   sourceLabel?: string;
   result?: ChatVerifyResult;
+  // Background-job state: an assistant reply still being verified server-side.
+  pending?: boolean;
+  jobId?: string;
+  // Transient bookkeeping so a resolved background job can be logged.
+  prompt?: string;
+  startedAt?: number;
 }
 
 const statusStyles: Record<
@@ -71,6 +78,13 @@ let idCounter = 0;
 function newId() {
   idCounter += 1;
   return `m${idCounter}-${performance.now().toFixed(0)}`;
+}
+
+/** The bubble text to show for a finished (or clarifying) verification. */
+function contentForResult(result: ChatVerifyResult): string {
+  return result.status === "NEEDS_CLARIFICATION"
+    ? result.clarification?.question || "Could you clarify?"
+    : result.verifiedResponse || "(no response)";
 }
 
 const EXAMPLES = [
@@ -101,6 +115,20 @@ export function Playground() {
   const fileRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
+  // Latest API key + messages, readable from long-lived pollers without stale closures.
+  const apiKeyRef = useRef<string | null>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  // Job ids we're already polling, so we never double-poll the same job.
+  const pollersRef = useRef<Set<string>>(new Set());
+  // Serialise Supabase writes so a fast job can't create a duplicate row.
+  const persistChain = useRef<Promise<unknown>>(Promise.resolve());
+
+  // Keep the value-refs fresh (after each render) for the long-lived pollers.
+  useEffect(() => {
+    apiKeyRef.current = apiKey;
+    messagesRef.current = messages;
+  });
+
   // Auto-grow the composer with its content (up to a max height).
   useEffect(() => {
     const el = taRef.current;
@@ -125,11 +153,12 @@ export function Playground() {
       const raw = sessionStorage.getItem(STORAGE_KEY);
       if (raw) {
         const saved = JSON.parse(raw) as { messages?: ChatMessage[]; convId?: string | null };
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        if (saved.messages?.length) setMessages(saved.messages);
+        if (saved.messages?.length) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setMessages(saved.messages); // a pending reply is resumed by the effect below
+        }
         if (saved.convId) {
           convIdRef.current = saved.convId;
-          // eslint-disable-next-line react-hooks/set-state-in-effect
           setActiveId(saved.convId);
         }
       }
@@ -152,35 +181,54 @@ export function Playground() {
 
   // Save/refresh the conversation in Supabase after each exchange.
   const persist = useCallback(
-    async (msgs: ChatMessage[]) => {
-      if (!msgs.length) return;
-      const id = await upsertConversation(
-        convIdRef.current,
-        titleFromMessages(msgs),
-        msgs,
-      );
-      if (id) {
-        if (convIdRef.current !== id) {
-          convIdRef.current = id;
-          setActiveId(id);
-        }
-        refreshHistory();
-      }
+    (msgs: ChatMessage[]) => {
+      // Chain writes so a create (id === null) settles before the next update,
+      // otherwise a fast background job could insert a second conversation row.
+      persistChain.current = persistChain.current
+        .then(async () => {
+          if (!msgs.length) return;
+          // Drop transient bookkeeping; keep pending/jobId so a reload can resume.
+          const clean = msgs.map((m) => {
+            const copy = { ...m };
+            delete copy.prompt;
+            delete copy.startedAt;
+            return copy;
+          });
+          const id = await upsertConversation(
+            convIdRef.current,
+            titleFromMessages(clean),
+            clean,
+          );
+          if (id) {
+            if (convIdRef.current !== id) {
+              convIdRef.current = id;
+              setActiveId(id);
+            }
+            refreshHistory();
+          }
+        })
+        .catch(() => {});
+      return persistChain.current;
     },
     [refreshHistory],
   );
 
-  const openConversation = useCallback(async (id: string) => {
-    const msgs = await getConversationMessages<ChatMessage>(id);
-    if (msgs) {
-      setMessages(msgs);
-      convIdRef.current = id;
-      setActiveId(id);
-      setError(null);
-      setLimitReached(false);
-      setShowHistory(false);
-    }
-  }, []);
+  const openConversation = useCallback(
+    async (id: string) => {
+      const msgs = await getConversationMessages<ChatMessage>(id);
+      if (msgs) {
+        setMessages(msgs);
+        convIdRef.current = id;
+        setActiveId(id);
+        setError(null);
+        setLimitReached(false);
+        setShowHistory(false);
+        // A reply may have finished while this chat was closed — the effect that
+        // watches `messages` will resume polling any still-pending replies.
+      }
+    },
+    [],
+  );
 
   const removeConversation = useCallback(
     async (e: React.MouseEvent, id: string) => {
@@ -196,10 +244,142 @@ export function Playground() {
     [refreshHistory],
   );
 
+  // Apply a finished background result to its placeholder bubble + persist + log.
+  const applyResult = useCallback(
+    (assistantId: string, result: ChatVerifyResult) => {
+      const target = messagesRef.current.find((m) => m.id === assistantId);
+      if (!target) return;
+      const next = messagesRef.current.map((m) =>
+        m.id === assistantId
+          ? {
+              ...m,
+              pending: false,
+              jobId: undefined,
+              content: contentForResult(result),
+              result,
+            }
+          : m,
+      );
+      setMessages(next);
+      void persist(next);
+
+      // Log real verdicts (not clarifying questions) to the dashboard history.
+      if (result.status !== "NEEDS_CLARIFICATION") {
+        logVerification(
+          {
+            verdict:
+              result.status === "PASS"
+                ? "PASS"
+                : result.status === "FLAGGED"
+                  ? "FLAGGED"
+                  : "BLOCKED",
+            consensusScore: result.consensusScore,
+            agreement: result.agreement,
+            verifiedResponse: result.verifiedResponse,
+            models: result.models,
+            raw: result.raw,
+          },
+          target.prompt || target.content,
+          target.startedAt ? Math.round(performance.now() - target.startedAt) : 0,
+        ).catch(() => {});
+      }
+    },
+    [persist],
+  );
+
+  // A background job failed / was lost: drop the placeholder, show the error.
+  const applyError = useCallback(
+    (assistantId: string, message: string) => {
+      const next = messagesRef.current.filter((m) => m.id !== assistantId);
+      setMessages(next);
+      void persist(next);
+      setError(message);
+    },
+    [persist],
+  );
+
+  // Poll one background job until it finishes, then update its bubble.
+  const pollJob = useCallback(
+    (jobId: string, assistantId: string) => {
+      if (pollersRef.current.has(jobId)) return; // already polling this job
+      pollersRef.current.add(jobId);
+      let tries = 0;
+      const stop = () => pollersRef.current.delete(jobId);
+
+      const tick = async () => {
+        tries += 1;
+        // Bubble gone (new chat / deleted / already resolved) → stop quietly.
+        const stillPending = messagesRef.current.some(
+          (m) => m.id === assistantId && m.pending,
+        );
+        if (!stillPending) return stop();
+
+        try {
+          const job = await fetchVerifyJob(jobId, apiKeyRef.current);
+          if (job.status === "done" && job.result) {
+            stop();
+            return applyResult(assistantId, job.result);
+          }
+          if (job.status === "error") {
+            stop();
+            return applyError(
+              assistantId,
+              job.error || "Verification didn't complete. Please try again.",
+            );
+          }
+        } catch (err) {
+          // A 404 after a few tries means the job was lost (e.g. server restart).
+          if (err instanceof ApiError && err.status === 404 && tries >= 3) {
+            stop();
+            return applyError(
+              assistantId,
+              "That verification didn't finish — please try again.",
+            );
+          }
+          // Otherwise it's transient (network blip / not yet visible) → keep trying.
+        }
+
+        if (tries >= 150) {
+          // ~5 minutes at 2s — give up gracefully.
+          stop();
+          return applyError(
+            assistantId,
+            "This is taking longer than usual — please try again.",
+          );
+        }
+        window.setTimeout(tick, 2000);
+      };
+
+      window.setTimeout(tick, 1500);
+    },
+    [applyResult, applyError],
+  );
+
+  // On load / when opening a chat, resume polling any still-pending replies.
+  const resumePending = useCallback(
+    (msgs: ChatMessage[]) => {
+      msgs.forEach((m) => {
+        if (m.role === "assistant" && m.pending && m.jobId) {
+          pollJob(m.jobId, m.id);
+        }
+      });
+    },
+    [pollJob],
+  );
+
+  // Whenever messages change (restore, open a chat, new reply), make sure every
+  // still-pending reply has a poller. pollJob dedupes, so this is idempotent.
+  useEffect(() => {
+    resumePending(messages);
+  }, [messages, resumePending]);
+
+  // Busy = a submit is in flight, or a background reply is still verifying.
+  const busy = loading || messages.some((m) => m.pending);
+
   const send = useCallback(
     async (text: string) => {
       const prompt = text.trim();
-      if (!prompt || loading) return;
+      if (!prompt || busy) return;
 
       const sourceLabel = doc
         ? `📎 ${doc.name}`
@@ -219,14 +399,23 @@ export function Playground() {
         content: prompt,
         sourceLabel,
       };
-      setMessages((m) => [...m, userMsg]);
+      const assistantId = newId();
+      const pendingMsg: ChatMessage = {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        pending: true,
+        prompt,
+        startedAt: performance.now(),
+      };
+      const optimistic = [...messages, userMsg, pendingMsg];
+      setMessages(optimistic);
       setInput("");
       setLoading(true);
       setError(null);
 
-      const startedAt = performance.now();
       try {
-        const result = await verifyChat(
+        const submit = await submitVerifyJob(
           {
             prompt,
             messages: history,
@@ -236,43 +425,34 @@ export function Playground() {
           apiKey,
         );
 
-        const assistant: ChatMessage = {
-          id: newId(),
-          role: "assistant",
-          content:
-            result.status === "NEEDS_CLARIFICATION"
-              ? result.clarification?.question || "Could you clarify?"
-              : result.verifiedResponse || "(no response)",
-          result,
-        };
-        setMessages((m) => [...m, assistant]);
-
-        // Persist real verdicts (not clarification prompts) to history.
-        if (result.status !== "NEEDS_CLARIFICATION") {
-          logVerification(
-            {
-              verdict:
-                result.status === "PASS"
-                  ? "PASS"
-                  : result.status === "FLAGGED"
-                    ? "FLAGGED"
-                    : "BLOCKED",
-              consensusScore: result.consensusScore,
-              agreement: result.agreement,
-              verifiedResponse: result.verifiedResponse,
-              models: result.models,
-              raw: result.raw,
-            },
-            prompt,
-            Math.round(performance.now() - startedAt),
-          ).catch(() => {});
+        if (submit.jobId) {
+          // Running server-side: attach the job id + save NOW so leaving is safe.
+          const withJob = optimistic.map((m) =>
+            m.id === assistantId ? { ...m, jobId: submit.jobId! } : m,
+          );
+          setMessages(withJob);
+          void persist(withJob);
+          pollJob(submit.jobId, assistantId);
+        } else if (submit.result) {
+          // Answered inline (a first-turn clarifying question) — no background job.
+          const resolved = optimistic.map((m) =>
+            m.id === assistantId
+              ? {
+                  ...m,
+                  pending: false,
+                  content: contentForResult(submit.result!),
+                  result: submit.result!,
+                }
+              : m,
+          );
+          setMessages(resolved);
+          void persist(resolved);
         }
-
-        // Persist the whole conversation (incl. clarifications) to chat history.
-        void persist([...messages, userMsg, assistant]);
       } catch (err) {
-        // 402 = monthly free quota used up -> show the upgrade prompt, not a raw error.
+        // Drop the placeholder; surface the failure.
+        setMessages((prev) => prev.filter((m) => m.id !== assistantId));
         if (err instanceof ApiError && err.status === 402) {
+          // Free daily quota used up → show the upgrade prompt, not a raw error.
           setLimitReached(true);
         } else {
           setError(err instanceof Error ? err.message : "Verification failed.");
@@ -281,7 +461,7 @@ export function Playground() {
         setLoading(false);
       }
     },
-    [messages, url, doc, apiKey, loading, persist],
+    [messages, url, doc, apiKey, busy, persist, pollJob],
   );
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -417,16 +597,6 @@ export function Playground() {
             ),
           )
         )}
-
-        {loading ? (
-          <div className="flex items-center gap-2.5 text-sm text-muted">
-            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-surface-2 text-primary">
-              <ShieldCheck className="h-4 w-4" />
-            </span>
-            <Spinner className="h-4 w-4" />
-            <span className="animate-pulse">Running multi-model verification…</span>
-          </div>
-        ) : null}
       </div>
 
       {limitReached ? (
@@ -492,7 +662,7 @@ export function Playground() {
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              send(input);
+              if (!busy) send(input);
             }
           }}
           className="max-h-[220px] min-h-[52px] resize-none border-0 bg-transparent px-1.5 text-[15px] leading-relaxed focus-visible:ring-0"
@@ -530,9 +700,9 @@ export function Playground() {
           <Button
             size="md"
             onClick={() => send(input)}
-            disabled={loading || !input.trim()}
+            disabled={busy || !input.trim()}
           >
-            {loading ? <Spinner /> : <SendHorizonal className="h-4 w-4" />}
+            {busy ? <Spinner /> : <SendHorizonal className="h-4 w-4" />}
             Send
           </Button>
         </div>
@@ -655,6 +825,25 @@ function AssistantBubble({
   const status: ChatStatus = result?.status ?? "PASS";
   const s = statusStyles[status];
   const isClarify = status === "NEEDS_CLARIFICATION";
+
+  // Reply still being verified server-side — safe to leave and come back.
+  if (message.pending) {
+    return (
+      <div className="flex justify-start gap-3">
+        <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-surface-2 text-primary ring-1 ring-border">
+          <ShieldCheck className="h-[18px] w-[18px]" />
+        </span>
+        <div className="max-w-[85%]">
+          <div className="flex items-center gap-2.5 rounded-2xl rounded-bl-md border border-border bg-surface-2 px-4 py-3 text-sm text-muted">
+            <Spinner className="h-4 w-4" />
+            <span className="animate-pulse">
+              Verifying in the background — you can leave this page and come back.
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex justify-start gap-3">
