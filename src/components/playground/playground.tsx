@@ -10,7 +10,6 @@ import {
   Link2,
   Paperclip,
   X,
-  KeyRound,
   MessageSquare,
   Trash2,
   PanelLeft,
@@ -103,7 +102,6 @@ export function Playground() {
   const [error, setError] = useState<string | null>(null);
   const [limitReached, setLimitReached] = useState(false);
   const [apiKey, setApiKey] = useState<string | null>(null);
-  const [keyLoaded, setKeyLoaded] = useState(false);
 
   // Chat history (persisted per-user in Supabase).
   const [history, setHistory] = useState<ConversationSummary[]>([]);
@@ -145,9 +143,11 @@ export function Playground() {
 
   // Fetch the user's API key + restore the in-tab chat + load history list.
   useEffect(() => {
+    // Load the user's Guardian API key if they have one (optional — logged-in
+    // requests also authenticate via the Supabase session token). No key is fine.
     fetchActiveApiKey()
       .then((k) => setApiKey(k))
-      .finally(() => setKeyLoaded(true));
+      .catch(() => {});
     refreshHistory();
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY);
@@ -543,21 +543,6 @@ export function Playground() {
             New chat
           </Button>
         </div>
-
-      {keyLoaded && !apiKey ? (
-        <Alert tone="info" className="mb-3">
-          <span className="inline-flex items-center gap-1.5">
-            <KeyRound className="h-4 w-4" />
-            You need an API key to run verifications.{" "}
-            <Link
-              href="/dashboard/api-keys"
-              className="font-medium text-primary hover:underline"
-            >
-              Create one →
-            </Link>
-          </span>
-        </Alert>
-      ) : null}
 
       {/* Messages — open, chat-style column */}
       <div
